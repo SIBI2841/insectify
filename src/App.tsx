@@ -1,19 +1,37 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef, type ChangeEvent, type DragEvent } from 'react';
 import { 
   Camera, Upload, Sparkles, AlertTriangle, ShieldCheck, Bug, Search, 
   History, BookOpen, RefreshCw, X, ChevronRight, Info, CheckCircle2, 
-  Eye, HelpCircle, Layers, Compass, Zap, ArrowLeft, Volume2
+  Eye, HelpCircle, Zap, ArrowLeft, Volume2
 } from 'lucide-react';
 
-// --- BUILT-IN FIELD GUIDE DATA & FALLBACK IDENTIFICATIONS ---
-const SAMPLE_INSECTS = [
+export interface InsectRecord {
+  id: string;
+  commonName: string;
+  scientificName: string;
+  order: string;
+  family?: string;
+  dangerLevel: string;
+  ecologicalRole: string;
+  confidence: number;
+  habitat: string;
+  diet: string;
+  physicalTraits: string[];
+  funFacts: string[];
+  indoorOutdoorTips: string;
+  thumbnail?: string;
+  timestamp?: string;
+  isSimulated?: boolean;
+}
+
+const SAMPLE_INSECTS: InsectRecord[] = [
   {
     id: 'monarch-butterfly',
     commonName: 'Monarch Butterfly',
     scientificName: 'Danaus plexippus',
     order: 'Lepidoptera',
     family: 'Nymphalidae',
-    dangerLevel: 'Beneficial', // Harmless, Beneficial, Pest, Venomous/Stinging, Medically Significant
+    dangerLevel: 'Beneficial',
     ecologicalRole: 'Pollinator',
     confidence: 97,
     habitat: 'Meadows, prairies, roadsides, and suburban gardens with milkweed.',
@@ -147,34 +165,29 @@ const SAMPLE_INSECTS = [
   }
 ];
 
-export default function InsectifyApp() {
-  // Navigation & Tabs
-  const [activeTab, setActiveTab] = useState('scanner'); // 'scanner', 'guide', 'history'
+export default function App() {
+  const [activeTab, setActiveTab] = useState<'scanner' | 'guide' | 'history'>('scanner');
   
-  // Scanner state
-  const [selectedImage, setSelectedImage] = useState(null); // base64 or preview URL
-  const [base64Raw, setBase64Raw] = useState(null);
-  const [mimeType, setMimeType] = useState('image/jpeg');
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [cameraStream, setCameraStream] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [scanResult, setScanResult] = useState(null);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [customApiKey, setCustomApiKey] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [base64Raw, setBase64Raw] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string>('image/jpeg');
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [scanResult, setScanResult] = useState<InsectRecord | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [customApiKey, setCustomApiKey] = useState<string>('');
+  const [showSettings, setShowSettings] = useState<boolean>(false);
 
-  // Field Guide & History State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedOrder, setSelectedOrder] = useState('All');
-  const [selectedGuideInsect, setSelectedGuideInsect] = useState(null);
-  const [scanHistory, setScanHistory] = useState([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedOrder, setSelectedOrder] = useState<string>('All');
+  const [selectedGuideInsect, setSelectedGuideInsect] = useState<InsectRecord | null>(null);
+  const [scanHistory, setScanHistory] = useState<InsectRecord[]>([]);
 
-  // DOM Refs
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load history from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem('insectify_history');
@@ -186,9 +199,8 @@ export default function InsectifyApp() {
     }
   }, []);
 
-  // Save history updates
-  const saveToHistory = (item) => {
-    const updated = [item, ...scanHistory.filter(h => h.id !== item.id)].slice(0, 30);
+  const saveToHistory = (item: InsectRecord) => {
+    const updated = [item, ...scanHistory.filter((h) => h.id !== item.id)].slice(0, 30);
     setScanHistory(updated);
     try {
       localStorage.setItem('insectify_history', JSON.stringify(updated));
@@ -197,7 +209,14 @@ export default function InsectifyApp() {
     }
   };
 
-  // Clean camera stream on unmount or mode switch
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraActive(false);
+  };
+
   useEffect(() => {
     return () => {
       stopCamera();
@@ -224,14 +243,6 @@ export default function InsectifyApp() {
     }
   };
 
-  const stopCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-    setIsCameraActive(false);
-  };
-
   const capturePhoto = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
@@ -239,8 +250,9 @@ export default function InsectifyApp() {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
     const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
     const raw = dataUrl.split(',')[1];
     setSelectedImage(dataUrl);
@@ -250,24 +262,24 @@ export default function InsectifyApp() {
     setScanResult(null);
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     processFile(file);
   };
 
-  const handleDragOver = (e) => {
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       processFile(e.dataTransfer.files[0]);
     }
   };
 
-  const processFile = (file) => {
+  const processFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
       setErrorMsg('Please upload a valid image file (PNG, JPG, WEBP).');
       return;
@@ -276,16 +288,17 @@ export default function InsectifyApp() {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result;
-      setSelectedImage(result);
-      const raw = result.split(',')[1];
-      setBase64Raw(raw);
-      setMimeType(file.type || 'image/jpeg');
-      setScanResult(null);
+      if (typeof result === 'string') {
+        setSelectedImage(result);
+        const raw = result.split(',')[1];
+        setBase64Raw(raw);
+        setMimeType(file.type || 'image/jpeg');
+        setScanResult(null);
+      }
     };
     reader.readAsDataURL(file);
   };
 
-  // Perform Gemini AI Identification or fallback
   const analyzeInsect = async () => {
     if (!base64Raw) return;
     setIsAnalyzing(true);
@@ -312,7 +325,7 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
     const effectiveKey = customApiKey.trim();
 
     try {
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${effectiveKey}`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${effectiveKey}`;
       
       const payload = {
         contents: [
@@ -348,7 +361,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
         throw new Error("No text response from Gemini vision model.");
       }
 
-      // Clean markdown code blocks if model wrapped it
       let cleanedJson = rawText.trim();
       if (cleanedJson.startsWith("```json")) {
         cleanedJson = cleanedJson.replace(/^```json/, "").replace(/```$/, "").trim();
@@ -357,10 +369,10 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
       }
 
       const parsed = JSON.parse(cleanedJson);
-      const enrichedResult = {
+      const enrichedResult: InsectRecord = {
         id: 'scan-' + Date.now(),
         timestamp: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        thumbnail: selectedImage,
+        thumbnail: selectedImage || undefined,
         ...parsed
       };
 
@@ -369,9 +381,8 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
 
     } catch (err) {
       console.warn("Gemini API call failed or no valid key, using smart mock demonstration:", err);
-      // Fallback: pick a sensible sample based on random/deterministic index
       const mockCandidate = SAMPLE_INSECTS[Math.floor(Math.random() * SAMPLE_INSECTS.length)];
-      const mockResult = {
+      const mockResult: InsectRecord = {
         ...mockCandidate,
         id: 'scan-' + Date.now(),
         timestamp: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
@@ -394,7 +405,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
     stopCamera();
   };
 
-  // Badge stylings based on dangerLevel
   const getDangerBadge = (level = '') => {
     const l = level.toLowerCase();
     if (l.includes('beneficial') || l.includes('harmless')) {
@@ -429,9 +439,8 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
     );
   };
 
-  // Filter Guide Insects
   const ordersList = ['All', 'Lepidoptera', 'Hymenoptera', 'Coleoptera', 'Mantodea', 'Blattodea', 'Araneae (Arachnid)'];
-  const filteredGuide = SAMPLE_INSECTS.filter(insect => {
+  const filteredGuide = SAMPLE_INSECTS.filter((insect) => {
     const matchesSearch = insect.commonName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           insect.scientificName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           insect.order.toLowerCase().includes(searchQuery.toLowerCase());
@@ -441,10 +450,8 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      {/* Hidden canvas for video frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Top Navbar */}
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-emerald-900/40 px-4 lg:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveTab('scanner'); resetScanner(); }}>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold">
@@ -461,7 +468,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
           </div>
         </div>
 
-        {/* Navigation Tabs */}
         <nav className="flex items-center gap-1 sm:gap-2 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60">
           <button
             onClick={() => setActiveTab('scanner')}
@@ -503,7 +509,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
           </button>
         </nav>
 
-        {/* Quick Settings trigger */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -515,12 +520,11 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
         </div>
       </header>
 
-      {/* Settings Bar / Modal Drawer */}
       {showSettings && (
         <div className="bg-slate-800 border-b border-emerald-800/40 px-4 py-3 text-xs flex flex-wrap items-center justify-between gap-3 text-slate-300">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-emerald-400" />
-            <span><strong>Gemini 3 Flash Vision API:</strong> Enter a custom Google Gemini API Key or leave empty to use built-in simulator engine.</span>
+            <span><strong>Gemini Vision API:</strong> Enter a custom Google Gemini API Key or leave empty to use built-in simulator engine.</span>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <input
@@ -540,7 +544,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
         </div>
       )}
 
-      {/* Error notification banner */}
       {errorMsg && (
         <div className="bg-rose-900/60 border-b border-rose-700/50 px-4 py-2.5 text-xs text-rose-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -553,14 +556,9 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
         </div>
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        
-        {/* ================= TAB 1: SCANNER / IDENTIFICATION ================= */}
         {activeTab === 'scanner' && (
           <div className="space-y-8">
-            
-            {/* Header intro */}
             {!scanResult && (
               <div className="text-center max-w-xl mx-auto space-y-2">
                 <span className="text-xs uppercase tracking-widest text-emerald-400 font-bold flex items-center justify-center gap-1.5">
@@ -575,7 +573,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
               </div>
             )}
 
-            {/* If camera is streaming */}
             {isCameraActive && (
               <div className="max-w-xl mx-auto bg-slate-800 rounded-2xl overflow-hidden border border-emerald-500/40 shadow-2xl relative">
                 <video
@@ -585,8 +582,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                   muted
                   className="w-full h-80 sm:h-96 object-cover bg-black"
                 />
-                
-                {/* Aiming Reticle Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div className="w-56 h-56 border-2 border-emerald-400/70 border-dashed rounded-3xl relative animate-pulse">
                     <span className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-emerald-950/90 text-emerald-300 text-[11px] px-2.5 py-0.5 rounded-full font-medium border border-emerald-500/40">
@@ -613,12 +608,9 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
               </div>
             )}
 
-            {/* Upload & Preview State when Camera is not active */}
             {!isCameraActive && !scanResult && (
               <div className="max-w-xl mx-auto space-y-6">
-                
                 {selectedImage ? (
-                  /* Picture Selected Preview Card */
                   <div className="bg-slate-800/80 rounded-2xl border border-slate-700 p-4 shadow-xl space-y-4">
                     <div className="relative rounded-xl overflow-hidden max-h-80 bg-black flex items-center justify-center">
                       <img 
@@ -663,7 +655,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                     </div>
                   </div>
                 ) : (
-                  /* Upload Box / Drag & Drop Dropzone */
                   <div
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
@@ -707,15 +698,11 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                     </div>
                   </div>
                 )}
-
               </div>
             )}
 
-            {/* ================= SCAN RESULT BREAKDOWN ================= */}
             {scanResult && (
-              <div className="max-w-4xl mx-auto space-y-6 animate-fadeIn">
-                
-                {/* Top Action Bar */}
+              <div className="max-w-4xl mx-auto space-y-6">
                 <div className="flex items-center justify-between">
                   <button
                     onClick={resetScanner}
@@ -733,15 +720,12 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                   </div>
                 </div>
 
-                {/* Primary Card */}
                 <div className="bg-slate-800/90 rounded-3xl border border-slate-700 overflow-hidden shadow-2xl">
-                  
-                  {/* Hero Header */}
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6 sm:p-8 border-b border-slate-700/60 bg-gradient-to-b from-slate-800 to-slate-800/40">
                     <div className="md:col-span-5 flex flex-col justify-center">
                       <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-black shadow-inner border border-slate-700">
                         <img
-                          src={scanResult.thumbnail || selectedImage}
+                          src={scanResult.thumbnail || selectedImage || ''}
                           alt={scanResult.commonName}
                           className="w-full h-full object-cover"
                         />
@@ -769,7 +753,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                         </p>
                       </div>
 
-                      {/* Taxonomy Pills */}
                       <div className="grid grid-cols-2 gap-2 text-xs bg-slate-900/60 p-3 rounded-xl border border-slate-700/60">
                         <div>
                           <span className="text-slate-400 block text-[10px] uppercase font-bold">Order</span>
@@ -810,17 +793,14 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                     </div>
                   </div>
 
-                  {/* Deep Details Grid */}
                   <div className="p-6 sm:p-8 space-y-6">
-                    
-                    {/* Key Identifying Physical Traits */}
                     <div>
                       <h4 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-3">
                         <Eye className="w-4 h-4 text-emerald-400" />
                         Key Physical & Anatomical Traits
                       </h4>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {scanResult.physicalTraits?.map((trait, idx) => (
+                        {scanResult.physicalTraits?.map((trait: string, idx: number) => (
                           <div key={idx} className="bg-slate-900/50 p-3.5 rounded-xl border border-slate-700/60 flex items-start gap-2.5">
                             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
                             <span className="text-xs text-slate-300 leading-relaxed">{trait}</span>
@@ -829,7 +809,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                       </div>
                     </div>
 
-                    {/* Habitat & Diet */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/60">
                         <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 block mb-1">
@@ -849,7 +828,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                       </div>
                     </div>
 
-                    {/* Actionable Encounter Guide (What to do indoors / outdoors) */}
                     <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-4 sm:p-5">
                       <div className="flex items-center gap-2 mb-1.5">
                         <HelpCircle className="w-4 h-4 text-emerald-400" />
@@ -862,7 +840,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                       </p>
                     </div>
 
-                    {/* Interesting Facts */}
                     {scanResult.funFacts && scanResult.funFacts.length > 0 && (
                       <div>
                         <h4 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-3">
@@ -870,7 +847,7 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                           Did You Know?
                         </h4>
                         <ul className="space-y-2">
-                          {scanResult.funFacts.map((fact, idx) => (
+                          {scanResult.funFacts.map((fact: string, idx: number) => (
                             <li key={idx} className="flex items-start gap-2.5 text-xs sm:text-sm text-slate-300 bg-slate-900/30 p-3 rounded-xl border border-slate-800">
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-2 flex-shrink-0" />
                               <span>{fact}</span>
@@ -879,20 +856,15 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                         </ul>
                       </div>
                     )}
-
                   </div>
                 </div>
-
               </div>
             )}
-
           </div>
         )}
 
-        {/* ================= TAB 2: FIELD GUIDE ================= */}
         {activeTab === 'guide' && (
           <div className="space-y-6">
-            
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-black text-white">Insect Field Guide</h2>
@@ -901,7 +873,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                 </p>
               </div>
 
-              {/* Search Bar */}
               <div className="relative w-full sm:w-72">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
                 <input
@@ -914,7 +885,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
               </div>
             </div>
 
-            {/* Order Filter Chips */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none">
               {ordersList.map((order) => (
                 <button
@@ -931,7 +901,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
               ))}
             </div>
 
-            {/* Field Guide Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {filteredGuide.map((insect) => (
                 <div
@@ -987,7 +956,6 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
           </div>
         )}
 
-        {/* ================= TAB 3: SCAN HISTORY ================= */}
         {activeTab === 'history' && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -1061,14 +1029,11 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
             )}
           </div>
         )}
-
       </main>
 
-      {/* Species Detail Modal (When opened from the Field Guide) */}
       {selectedGuideInsect && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-800 border border-slate-700 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col animate-scaleUp">
-            
+          <div className="bg-slate-800 border border-slate-700 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
             <div className="relative aspect-[16/9] bg-black">
               <img
                 src={selectedGuideInsect.thumbnail}
@@ -1124,7 +1089,7 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
               <div>
                 <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-1">Key Traits</h5>
                 <ul className="space-y-1">
-                  {selectedGuideInsect.physicalTraits.map((trait, i) => (
+                  {selectedGuideInsect.physicalTraits.map((trait: string, i: number) => (
                     <li key={i} className="text-xs text-slate-300 flex items-start gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" />
                       <span>{trait}</span>
@@ -1147,12 +1112,10 @@ If the image does not show any insect, bug, spider, or related arthropod, specif
                 </button>
               </div>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* Footer */}
       <footer className="mt-auto border-t border-slate-800 bg-slate-950 px-4 py-4 text-center text-xs text-slate-500">
         <p>Insectify AI • Powered by Gemini Vision & Biological Taxonomy Intelligence • For outdoor discovery & education</p>
       </footer>
